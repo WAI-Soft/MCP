@@ -2,41 +2,32 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 export interface KiroTask {
-  id: string;
   title: string;
-  status: 'not_started' | 'queued' | 'in_progress' | 'completed';
-  description?: string;
+  status: 'not_started' | 'completed';
   filePath: string;
   lineNumber: number;
 }
 
 /**
- * Parse tasks.md file and extract tasks
+ * Parse a tasks.md file and extract tasks from markdown checkboxes.
+ * Handles formats like:
+ *   - [ ] Task title
+ *   - [x] Completed task
+ *   - [ ] 1.1 Numbered task
  */
 export function parseTasksFile(filePath: string): KiroTask[] {
-  if (!fs.existsSync(filePath)) {
-    return [];
-  }
+  if (!fs.existsSync(filePath)) return [];
 
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n');
   const tasks: KiroTask[] = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const taskMatch = line.match(/^- \[([ x])\] (.+)$/);
-    
-    if (taskMatch) {
-      const [, checkbox, title] = taskMatch;
-      const status = checkbox === 'x' ? 'completed' : 'not_started';
-      
-      // Generate unique ID from file path and line number
-      const id = `${path.basename(filePath)}-${i}`;
-      
+    const match = lines[i].match(/^\s*- \[([ xX])\]\s+(.+)$/);
+    if (match) {
       tasks.push({
-        id,
-        title: title.trim(),
-        status,
+        title: match[2].trim(),
+        status: match[1].toLowerCase() === 'x' ? 'completed' : 'not_started',
         filePath,
         lineNumber: i,
       });
@@ -47,82 +38,76 @@ export function parseTasksFile(filePath: string): KiroTask[] {
 }
 
 /**
- * Update task status in tasks.md file
+ * Find all tasks.md files in a workspace.
+ * Prioritizes .kiro/specs/ directories (Kiro's native location).
  */
-export function updateTaskStatus(
-  filePath: string,
-  lineNumber: number,
-  newStatus: 'not_started' | 'completed'
-): void {
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`File not found: ${filePath}`);
+export function findTasksFiles(workspaceDir: string): string[] {
+  const results: string[] = [];
+
+  const kiroSpecsDir = path.join(workspaceDir, '.kiro', 'specs');
+  if (fs.existsSync(kiroSpecsDir)) {
+    searchDir(kiroSpecsDir, results);
   }
 
-  const content = fs.readFileSync(filePath, 'utf-8');
-  const lines = content.split('\n');
-
-  if (lineNumber >= lines.length) {
-    throw new Error(`Line ${lineNumber} not found in file`);
+  const rootTasks = path.join(workspaceDir, 'tasks.md');
+  if (fs.existsSync(rootTasks) && !results.includes(rootTasks)) {
+    results.push(rootTasks);
   }
 
-  const line = lines[lineNumber];
-  const checkbox = newStatus === 'completed' ? 'x' : ' ';
-  
-  // Replace checkbox
-  lines[lineNumber] = line.replace(/^- \[([ x])\]/, `- [${checkbox}]`);
-
-  fs.writeFileSync(filePath, lines.join('\n'), 'utf-8');
+  return results;
 }
 
-/**
- * Find all tasks.md files in a directory
- */
-export function findTasksFiles(dir: string): string[] {
-  const tasksFiles: string[] = [];
+function searchDir(dir: string, results: string[]): void {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch { return; }
 
-  function searchDir(currentDir: string) {
-    if (!fs.existsSync(currentDir)) return;
-
-    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      const fullPath = path.join(currentDir, entry.name);
-
-      // Skip node_modules, .git, etc
-      if (entry.name.startsWith('.') || entry.name === 'node_modules') {
-        continue;
-      }
-
-      if (entry.isDirectory()) {
-        searchDir(fullPath);
-      } else if (entry.name === 'tasks.md') {
-        tasksFiles.push(fullPath);
-      }
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
+      searchDir(fullPath, results);
+    } else if (entry.name === 'tasks.md') {
+      results.push(fullPath);
     }
   }
-
-  searchDir(dir);
-  return tasksFiles;
 }
 
 /**
- * Watch tasks.md files for changes
+ * Watch tasks.md files for changes with debounce.
  */
 export function watchTasksFiles(
-  dir: string,
-  onChange: (filePath: string, tasks: KiroTask[]) => void
+  workspaceDir: string,
+  onChange: (filePath: string, tasks: KiroTask[]) => void,
+  debounceMs = 500,
 ): fs.FSWatcher[] {
-  const tasksFiles = findTasksFiles(dir);
+  const files = findTasksFiles(workspaceDir);
   const watchers: fs.FSWatcher[] = [];
+  const timers = new Map<string, NodeJS.Timeout>();
 
-  for (const file of tasksFiles) {
-    const watcher = fs.watch(file, (eventType) => {
-      if (eventType === 'change') {
-        const tasks = parseTasksFile(file);
-        onChange(file, tasks);
-      }
-    });
-    watchers.push(watcher);
+  for (const file of files) {
+    try {
+      const watcher = fs.watch(file, (eventType) => {
+        if (eventType !== 'change') return;
+
+        const existing = timers.get(file);
+        if (existing) clearTimeout(existing);
+
+        timers.set(file, setTimeout(() => {
+          timers.delete(file);
+          try {
+            const tasks = parseTasksFile(file);
+            onChange(file, tasks);
+          } catch (err: any) {
+            console.error(`Error parsing ${file}:`, err.message);
+          }
+        }, debounceMs));
+      });
+      watchers.push(watcher);
+      console.error(`👁️  Watching: ${path.relative(workspaceDir, file)}`);
+    } catch (err: any) {
+      console.error(`Cannot watch ${file}:`, err.message);
+    }
   }
 
   return watchers;

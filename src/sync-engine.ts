@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
-import { updateTaskStatus, watchTasksFiles, KiroTask } from './task-parser.js';
+import { parseTasksFile, findTasksFiles, watchTasksFiles, KiroTask } from './task-parser.js';
+import * as fs from 'fs';
 import * as path from 'path';
 
 export interface SyncEngineConfig {
@@ -9,14 +10,27 @@ export interface SyncEngineConfig {
   workspaceDir: string;
 }
 
+interface TaskMapping {
+  cirvoyId: number;
+  lastStatus: string;
+}
+
+interface SyncState {
+  mappings: Record<string, TaskMapping>;
+}
+
 export class SyncEngine {
   private api: AxiosInstance;
   private config: SyncEngineConfig;
-  private taskMapping: Map<string, number> = new Map(); // Kiro task ID -> Cirvoy task ID
-  private watchers: any[] = [];
+  private state: SyncState = { mappings: {} };
+  private stateFilePath: string;
+  private watchers: fs.FSWatcher[] = [];
+  private syncing = false;
 
   constructor(config: SyncEngineConfig) {
     this.config = config;
+    this.stateFilePath = path.join(config.workspaceDir, '.cirvoy-sync.json');
+
     this.api = axios.create({
       baseURL: config.cirvoyBaseUrl,
       headers: {
@@ -25,160 +39,141 @@ export class SyncEngine {
       },
       timeout: 30000,
     });
+
+    this.loadState();
   }
 
-  /**
-   * Start syncing
-   */
   async start(): Promise<void> {
-    console.error('🔄 Starting sync engine...');
+    console.error('🔄 SyncEngine starting...');
+    console.error(`📂 Workspace: ${this.config.workspaceDir}`);
+    console.error(`🌐 Cirvoy API: ${this.config.cirvoyBaseUrl}`);
+    console.error(`📋 Project ID: ${this.config.cirvoyProjectId}`);
 
-    // Initial sync: Load existing tasks from Cirvoy
-    await this.loadExistingTasks();
+    // Initial sync on startup
+    await this.fullSync();
 
-    // Watch for changes in Kiro tasks
+    // Watch for file changes
     this.watchers = watchTasksFiles(this.config.workspaceDir, (filePath, tasks) => {
-      this.onKiroTasksChanged(filePath, tasks);
+      this.onFileChanged(filePath, tasks);
     });
 
-    console.error('✅ Sync engine started');
+    const fileCount = this.watchers.length;
+    console.error(`✅ SyncEngine running - watching ${fileCount} file(s)`);
   }
 
-  /**
-   * Stop syncing
-   */
   stop(): void {
-    for (const watcher of this.watchers) {
-      watcher.close();
-    }
+    for (const w of this.watchers) w.close();
     this.watchers = [];
-    console.error('🛑 Sync engine stopped');
+    console.error('🛑 SyncEngine stopped');
   }
 
   /**
-   * Load existing tasks from Cirvoy and build mapping
+   * Full sync: scan all tasks.md files, create/update in Cirvoy
    */
-  private async loadExistingTasks(): Promise<void> {
+  private async fullSync(): Promise<void> {
+    const files = findTasksFiles(this.config.workspaceDir);
+    console.error(`📑 Found ${files.length} tasks file(s)`);
+
+    for (const file of files) {
+      const tasks = parseTasksFile(file);
+      await this.syncTasks(tasks);
+    }
+  }
+
+  /**
+   * Handle file change event
+   */
+  private async onFileChanged(filePath: string, tasks: KiroTask[]): Promise<void> {
+    const relPath = path.relative(this.config.workspaceDir, filePath);
+    console.error(`📝 Change detected: ${relPath}`);
+    await this.syncTasks(tasks);
+  }
+
+  /**
+   * Sync a list of parsed Kiro tasks to Cirvoy
+   */
+  private async syncTasks(tasks: KiroTask[]): Promise<void> {
+    if (this.syncing) return;
+    this.syncing = true;
+
     try {
-      const response = await this.api.get('/tasks', {
-        params: { project_id: this.config.cirvoyProjectId },
+      for (const task of tasks) {
+        const key = this.taskKey(task);
+        const mapping = this.state.mappings[key];
+        const cirvoyStatus = task.status === 'completed' ? 'done' : 'todo';
+
+        if (!mapping) {
+          // New task → create in Cirvoy
+          await this.createTask(task, key, cirvoyStatus);
+        } else if (mapping.lastStatus !== cirvoyStatus) {
+          // Status changed → update in Cirvoy
+          await this.updateTask(task, key, mapping.cirvoyId, cirvoyStatus);
+        }
+      }
+    } finally {
+      this.syncing = false;
+    }
+  }
+
+  private async createTask(task: KiroTask, key: string, cirvoyStatus: string): Promise<void> {
+    try {
+      const response = await this.api.post('/tasks', {
+        project_id: parseInt(this.config.cirvoyProjectId, 10),
+        title: task.title,
+        status: cirvoyStatus,
+        priority: 'medium',
       });
 
-      const cirvoyTasks = response.data.data || [];
-      console.error(`📥 Loaded ${cirvoyTasks.length} tasks from Cirvoy`);
-
-      // Build mapping based on task titles (simple approach)
-      for (const task of cirvoyTasks) {
-        // Store by title for now (we'll improve this later)
-        this.taskMapping.set(task.title, task.id);
+      const cirvoyId = response.data?.data?.id;
+      if (cirvoyId) {
+        this.state.mappings[key] = { cirvoyId, lastStatus: cirvoyStatus };
+        this.saveState();
+        console.error(`  ✅ Created: "${task.title}" → Cirvoy #${cirvoyId}`);
       }
-    } catch (error: any) {
-      console.error('❌ Error loading tasks from Cirvoy:', error.message);
+    } catch (err: any) {
+      console.error(`  ❌ Failed to create "${task.title}": ${err.response?.data?.error || err.message}`);
     }
   }
 
-  /**
-   * Handle changes in Kiro tasks
-   */
-  private async onKiroTasksChanged(filePath: string, tasks: KiroTask[]): Promise<void> {
-    console.error(`📝 Tasks changed in ${path.basename(filePath)}`);
-
-    for (const task of tasks) {
-      await this.syncTaskToCirvoy(task);
-    }
-  }
-
-  /**
-   * Sync a Kiro task to Cirvoy
-   */
-  private async syncTaskToCirvoy(kiroTask: KiroTask): Promise<void> {
+  private async updateTask(task: KiroTask, key: string, cirvoyId: number, cirvoyStatus: string): Promise<void> {
     try {
-      const cirvoyTaskId = this.taskMapping.get(kiroTask.title);
+      const updateData: any = { status: cirvoyStatus };
+      if (cirvoyStatus === 'done') updateData.progress = 100;
 
-      if (cirvoyTaskId) {
-        // Update existing task
-        const cirvoyStatus = this.mapKiroStatusToCirvoy(kiroTask.status);
-        
-        await this.api.put(`/tasks/${cirvoyTaskId}`, {
-          status: cirvoyStatus,
-          progress: kiroTask.status === 'completed' ? 100 : 0,
-        });
+      await this.api.put(`/tasks/${cirvoyId}`, updateData);
 
-        console.error(`✅ Updated task in Cirvoy: ${kiroTask.title}`);
-      } else {
-        // Create new task
-        const response = await this.api.post('/tasks', {
-          project_id: this.config.cirvoyProjectId,
-          title: kiroTask.title,
-          description: kiroTask.description || '',
-          status: this.mapKiroStatusToCirvoy(kiroTask.status),
-          priority: 'medium',
-        });
-
-        const newTaskId = response.data.data.id;
-        this.taskMapping.set(kiroTask.title, newTaskId);
-
-        console.error(`✅ Created task in Cirvoy: ${kiroTask.title}`);
-      }
-    } catch (error: any) {
-      console.error(`❌ Error syncing task "${kiroTask.title}":`, error.message);
+      this.state.mappings[key].lastStatus = cirvoyStatus;
+      this.saveState();
+      console.error(`  ✅ Updated: "${task.title}" → ${cirvoyStatus}`);
+    } catch (err: any) {
+      console.error(`  ❌ Failed to update "${task.title}": ${err.response?.data?.error || err.message}`);
     }
   }
 
   /**
-   * Sync a Cirvoy task to Kiro
+   * Unique key for a task: relative file path + title
    */
-  async syncTaskToKiro(cirvoyTask: any): Promise<void> {
+  private taskKey(task: KiroTask): string {
+    const relPath = path.relative(this.config.workspaceDir, task.filePath);
+    return `${relPath}::${task.title}`;
+  }
+
+  private loadState(): void {
     try {
-      // Find the Kiro task by title
-      const kiroTaskId = Array.from(this.taskMapping.entries())
-        .find(([_, id]) => id === cirvoyTask.id)?.[0];
-
-      if (!kiroTaskId) {
-        console.error(`⚠️ Task not found in Kiro: ${cirvoyTask.title}`);
-        return;
+      if (fs.existsSync(this.stateFilePath)) {
+        const raw = fs.readFileSync(this.stateFilePath, 'utf-8');
+        this.state = JSON.parse(raw);
       }
-
-      // Parse task ID to get file path and line number
-      const [fileName, lineStr] = kiroTaskId.split('-');
-      const lineNumber = parseInt(lineStr, 10);
-
-      // Find the file
-      const tasksFiles = require('./task-parser.js').findTasksFiles(this.config.workspaceDir);
-      const filePath = tasksFiles.find((f: string) => path.basename(f) === fileName);
-
-      if (!filePath) {
-        console.error(`⚠️ File not found: ${fileName}`);
-        return;
-      }
-
-      // Update task status
-      const kiroStatus = this.mapCirvoyStatusToKiro(cirvoyTask.status);
-      updateTaskStatus(filePath, lineNumber, kiroStatus);
-
-      console.error(`✅ Updated task in Kiro: ${cirvoyTask.title}`);
-    } catch (error: any) {
-      console.error(`❌ Error syncing task to Kiro:`, error.message);
+    } catch {
+      this.state = { mappings: {} };
     }
   }
 
-  /**
-   * Map Kiro status to Cirvoy status
-   */
-  private mapKiroStatusToCirvoy(kiroStatus: string): string {
-    const mapping: Record<string, string> = {
-      'not_started': 'todo',
-      'queued': 'todo',
-      'in_progress': 'in_progress',
-      'completed': 'done',
-    };
-    return mapping[kiroStatus] || 'todo';
-  }
-
-  /**
-   * Map Cirvoy status to Kiro status
-   */
-  private mapCirvoyStatusToKiro(cirvoyStatus: string): 'not_started' | 'completed' {
-    return cirvoyStatus === 'done' ? 'completed' : 'not_started';
+  private saveState(): void {
+    try {
+      fs.writeFileSync(this.stateFilePath, JSON.stringify(this.state, null, 2), 'utf-8');
+    } catch (err: any) {
+      console.error(`Failed to save sync state: ${err.message}`);
+    }
   }
 }
