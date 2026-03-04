@@ -1,0 +1,28 @@
+{
+  "$schema": "../src/types/config.ts#configSchema",
+  "cirvoy": {
+    "baseURL": "https://cirvoy.example.com/api",
+    "apiToken": "your-api-token-here",
+    "webhookSecret": "your-webhook-secret-here",
+    "timeout": 30000
+  },
+  "server": {
+    "webhookPort": 3000,
+    "syncInterval": 5,
+    "maxRetries": 3,
+    "retryBackoffMs": 1000
+  },
+  "storage": {
+    "dbPath": "~/.kiro/cirvoy-mcp/database.sqlite",
+    "encryptionKey": "your-32-character-encryption-key-here-minimum-length"
+  },
+  "logging": {
+    "level": "info",
+    "filePath": "~/.kiro/cirvoy-mcp/logs/server.log"
+  },
+  "performance": {
+    "maxMemoryMB": 100,
+    "batchSize": 10,
+    "maxConcurrentSyncs": 5
+  }
+}
