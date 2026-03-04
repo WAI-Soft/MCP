@@ -2,7 +2,7 @@
 
 🔗 Seamless task synchronization between Kiro IDE and Cirvoy project management.
 
-## 🚀 Quick Start
+## 🚀 Quick Start for Employees
 
 ### Step 1: Get Your API Token
 
@@ -20,7 +20,7 @@ In your project folder, create `.kiro/settings/mcp.json`:
   "mcpServers": {
     "cirvoy-sync": {
       "command": "npx",
-      "args": ["-y", "github:WAI-Soft/MCP"],
+      "args": ["-y", "@cirvoy/kiro-mcp"],
       "env": {
         "CIRVOY_BASE_URL": "https://cirvoy.com/api/kiro",
         "CIRVOY_API_TOKEN": "paste-your-token-here",
@@ -41,41 +41,7 @@ Close and reopen Kiro IDE. The MCP server will start automatically!
 
 ## 🎯 Multiple Projects?
 
-Each Kiro workspace can connect to a different Cirvoy project!
-
-**Project A** (Website Redesign - ID: 57):
-```
-/path/to/website-redesign/.kiro/settings/mcp.json
-```
-```json
-{
-  "mcpServers": {
-    "cirvoy-sync": {
-      "env": {
-        "CIRVOY_PROJECT_ID": "57"
-      }
-    }
-  }
-}
-```
-
-**Project B** (Mobile App - ID: 42):
-```
-/path/to/mobile-app/.kiro/settings/mcp.json
-```
-```json
-{
-  "mcpServers": {
-    "cirvoy-sync": {
-      "env": {
-        "CIRVOY_PROJECT_ID": "42"
-      }
-    }
-  }
-}
-```
-
-See [WORKSPACE_SETUP.md](WORKSPACE_SETUP.md) for details.
+Each Kiro workspace can connect to a different Cirvoy project! Just use a different `CIRVOY_PROJECT_ID` in each workspace's `.kiro/settings/mcp.json`.
 
 ## 🛠️ Available Tools
 
@@ -86,30 +52,6 @@ Once connected, you can use these MCP tools in Kiro:
 - `create_task` - Create new task
 - `list_tasks` - List all project tasks
 - `batch_update_tasks` - Update multiple tasks
-
-## 📚 Documentation
-
-- [Workspace Setup Guide](WORKSPACE_SETUP.md) - Multiple projects
-- [Arabic Setup Guide](docs/KIRO_SETUP.md) - دليل الإعداد بالعربي
-- [Configuration Guide](docs/CONFIG_GUIDE.md)
-- [Troubleshooting](docs/TROUBLESHOOTING.md)
-
-## ❓ FAQ
-
-**Q: Where do I find my project ID?**  
-A: In the Cirvoy URL: `https://cirvoy.com/admin/projects/57` → ID is `57`
-
-**Q: Can I use the same token for multiple projects?**  
-A: Yes! One token works for all your projects.
-
-**Q: How do I revoke a token?**  
-A: Go to Cirvoy Settings → API Tokens → Click "Revoke"
-
-## 🔧 Requirements
-
-- Node.js 18+
-- Kiro IDE
-- Cirvoy account
 
 ## 📝 License
 
