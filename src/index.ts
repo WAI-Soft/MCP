@@ -22,29 +22,11 @@ const api = axios.create({
 let syncEngine: SyncEngine | null = null;
 
 export async function main() {
-  console.error('🚀 Cirvoy-Kiro MCP Server starting...');
+  console.error('Cirvoy-Kiro MCP Server starting...');
 
   if (!CIRVOY_API_TOKEN) {
-    console.error('❌ CIRVOY_API_TOKEN is required');
+    console.error('CIRVOY_API_TOKEN is required');
     process.exit(1);
-  }
-
-  // Start auto-sync if project ID is configured
-  if (CIRVOY_PROJECT_ID) {
-    syncEngine = new SyncEngine({
-      cirvoyBaseUrl: CIRVOY_BASE_URL,
-      cirvoyApiToken: CIRVOY_API_TOKEN,
-      cirvoyProjectId: CIRVOY_PROJECT_ID,
-      workspaceDir: WORKSPACE_DIR,
-    });
-    
-    // Start sync engine in background (don't block MCP server startup)
-    syncEngine.start().catch(err => {
-      console.error('⚠️ Sync engine failed to start:', err.message);
-      console.error('ℹ️  MCP server will continue running. Manual tools are still available.');
-    });
-  } else {
-    console.error('ℹ️  CIRVOY_PROJECT_ID not set - auto-sync disabled. Manual tools still available.');
   }
 
   const server = new Server(
@@ -173,7 +155,6 @@ export async function main() {
     }
   });
 
-  // Graceful shutdown
   const shutdown = () => {
     console.error('Shutting down...');
     syncEngine?.stop();
@@ -184,12 +165,23 @@ export async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('✅ Cirvoy-Kiro MCP Server running');
+  console.error('Cirvoy-Kiro MCP Server running');
+
+  if (CIRVOY_PROJECT_ID) {
+    syncEngine = new SyncEngine({
+      cirvoyBaseUrl: CIRVOY_BASE_URL,
+      cirvoyApiToken: CIRVOY_API_TOKEN,
+      cirvoyProjectId: CIRVOY_PROJECT_ID,
+      workspaceDir: WORKSPACE_DIR,
+    });
+
+    syncEngine.start().catch(err => {
+      console.error('Sync engine failed:', err.message);
+    });
+  }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) => {
-    console.error('Fatal:', err);
-    process.exit(1);
-  });
-}
+main().catch((err) => {
+  console.error('Fatal:', err);
+  process.exit(1);
+});
