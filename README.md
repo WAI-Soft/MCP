@@ -1,12 +1,19 @@
 # Cirvoy-Kiro MCP Integration
 
-🔗 MCP Server for seamless task synchronization between Kiro IDE and Cirvoy project management system.
+🔗 Seamless task synchronization between Kiro IDE and Cirvoy project management.
 
-## 🚀 Quick Start for Team Members
+## 🚀 Quick Start
 
-### Installation
+### Step 1: Get Your API Token
 
-Add this to your Kiro IDE configuration file (`.kiro/settings/mcp.json`):
+1. Go to **[Cirvoy Settings → API Tokens](https://cirvoy.com/settings/api-tokens)**
+2. Click "Generate Token"
+3. Give it a name (e.g., "My Laptop - Kiro IDE")
+4. **Copy the token** (you won't see it again!)
+
+### Step 2: Setup in Kiro IDE
+
+In your project folder, create `.kiro/settings/mcp.json`:
 
 ```json
 {
@@ -16,49 +23,93 @@ Add this to your Kiro IDE configuration file (`.kiro/settings/mcp.json`):
       "args": ["-y", "github:WAI-Soft/MCP"],
       "env": {
         "CIRVOY_BASE_URL": "https://cirvoy.com/api/kiro",
-        "CIRVOY_API_TOKEN": "YOUR_API_TOKEN_HERE"
+        "CIRVOY_API_TOKEN": "paste-your-token-here",
+        "CIRVOY_PROJECT_ID": "57"
       }
     }
   }
 }
 ```
 
-### Get Your API Token
+**Important:** Replace:
+- `paste-your-token-here` with your actual token
+- `57` with your Cirvoy project ID (find it in the project URL: `cirvoy.com/admin/projects/57`)
 
-1. Go to [Cirvoy Settings](https://cirvoy.com/settings/api)
-2. Generate a new API token
-3. Copy the token and paste it in the config above
+### Step 3: Restart Kiro IDE
 
-### Restart Kiro IDE
+Close and reopen Kiro IDE. The MCP server will start automatically!
 
-After adding the configuration, restart Kiro IDE to load the MCP server.
+## 🎯 Multiple Projects?
 
-## ✨ Features
+Each Kiro workspace can connect to a different Cirvoy project!
 
-- ✅ Bidirectional task synchronization
-- ✅ Real-time updates via webhooks
-- ✅ Offline queue for network resilience
-- ✅ Conflict detection and resolution
-- ✅ Secure API communication
+**Project A** (Website Redesign - ID: 57):
+```
+/path/to/website-redesign/.kiro/settings/mcp.json
+```
+```json
+{
+  "mcpServers": {
+    "cirvoy-sync": {
+      "env": {
+        "CIRVOY_PROJECT_ID": "57"
+      }
+    }
+  }
+}
+```
 
-## 🛠️ Available MCP Tools
+**Project B** (Mobile App - ID: 42):
+```
+/path/to/mobile-app/.kiro/settings/mcp.json
+```
+```json
+{
+  "mcpServers": {
+    "cirvoy-sync": {
+      "env": {
+        "CIRVOY_PROJECT_ID": "42"
+      }
+    }
+  }
+}
+```
 
-- `sync_task` - Sync a single task
-- `sync_all_tasks` - Sync all tasks in a project
-- `get_sync_status` - Get current sync status
-- `resolve_conflict` - Resolve sync conflicts
+See [WORKSPACE_SETUP.md](WORKSPACE_SETUP.md) for details.
+
+## 🛠️ Available Tools
+
+Once connected, you can use these MCP tools in Kiro:
+
+- `get_task` - Get task details
+- `update_task` - Update task status/priority
+- `create_task` - Create new task
+- `list_tasks` - List all project tasks
+- `batch_update_tasks` - Update multiple tasks
 
 ## 📚 Documentation
 
+- [Workspace Setup Guide](WORKSPACE_SETUP.md) - Multiple projects
 - [Arabic Setup Guide](docs/KIRO_SETUP.md) - دليل الإعداد بالعربي
 - [Configuration Guide](docs/CONFIG_GUIDE.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
+
+## ❓ FAQ
+
+**Q: Where do I find my project ID?**  
+A: In the Cirvoy URL: `https://cirvoy.com/admin/projects/57` → ID is `57`
+
+**Q: Can I use the same token for multiple projects?**  
+A: Yes! One token works for all your projects.
+
+**Q: How do I revoke a token?**  
+A: Go to Cirvoy Settings → API Tokens → Click "Revoke"
 
 ## 🔧 Requirements
 
 - Node.js 18+
 - Kiro IDE
-- Cirvoy account with API access
+- Cirvoy account
 
 ## 📝 License
 
