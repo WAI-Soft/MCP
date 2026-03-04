@@ -37,7 +37,12 @@ export async function main() {
       cirvoyProjectId: CIRVOY_PROJECT_ID,
       workspaceDir: WORKSPACE_DIR,
     });
-    await syncEngine.start();
+    
+    // Start sync engine in background (don't block MCP server startup)
+    syncEngine.start().catch(err => {
+      console.error('⚠️ Sync engine failed to start:', err.message);
+      console.error('ℹ️  MCP server will continue running. Manual tools are still available.');
+    });
   } else {
     console.error('ℹ️  CIRVOY_PROJECT_ID not set - auto-sync disabled. Manual tools still available.');
   }
