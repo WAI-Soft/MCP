@@ -3,16 +3,17 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import axios from 'axios';
+import { SyncEngine } from './sync-engine.js';
 
 // Export modules
 export * from './config/index.js';
 export * from './types/index.js';
 export * from './api-client/index.js';
 
-// @ts-ignore
-const CIRVOY_PROJECT_ID = process.env.CIRVOY_PROJECT_ID || "";
 const CIRVOY_BASE_URL = process.env.CIRVOY_BASE_URL || 'https://cirvoy.com/api/kiro';
 const CIRVOY_API_TOKEN = process.env.CIRVOY_API_TOKEN || '';
+const CIRVOY_PROJECT_ID = process.env.CIRVOY_PROJECT_ID || '';
+const WORKSPACE_DIR = process.env.WORKSPACE_DIR || process.cwd();
 
 // Create axios instance
 const api = axios.create({
@@ -24,6 +25,9 @@ const api = axios.create({
   timeout: 30000,
 });
 
+// Sync engine instance
+let syncEngine: SyncEngine | null = null;
+
 export async function main() {
   console.error('🚀 Cirvoy-Kiro MCP Server starting...');
   
@@ -32,10 +36,30 @@ export async function main() {
     process.exit(1);
   }
 
+  if (!CIRVOY_PROJECT_ID) {
+    console.error('⚠️ Warning: CIRVOY_PROJECT_ID not set. Auto-sync disabled.');
+  }
+
   const server = new Server(
     { name: 'cirvoy-kiro-mcp', version: '1.0.0' },
     { capabilities: { tools: {} } }
   );
+
+  // Start sync engine if project ID is provided
+  if (CIRVOY_PROJECT_ID) {
+    syncEngine = new SyncEngine({
+      cirvoyBaseUrl: CIRVOY_BASE_URL,
+      cirvoyApiToken: CIRVOY_API_TOKEN,
+      cirvoyProjectId: CIRVOY_PROJECT_ID,
+      workspaceDir: WORKSPACE_DIR,
+    });
+    
+    try {
+      await syncEngine.start();
+    } catch (error: any) {
+      console.error('❌ Failed to start sync engine:', error.message);
+    }
+  }
 
   // List available tools
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -117,6 +141,14 @@ export async function main() {
             required: ['tasks'],
           },
         },
+        {
+          name: 'sync_now',
+          description: 'Manually trigger sync between Kiro and Cirvoy',
+          inputSchema: {
+            type: 'object',
+            properties: {},
+          },
+        },
       ],
     };
   });
@@ -180,6 +212,26 @@ export async function main() {
           };
         }
 
+        case 'sync_now': {
+          if (!syncEngine) {
+            return {
+              content: [{
+                type: 'text',
+                text: '⚠️ Sync engine not running. Set CIRVOY_PROJECT_ID to enable auto-sync.',
+              }],
+            };
+          }
+
+          // Trigger manual sync
+          await syncEngine.start();
+          return {
+            content: [{
+              type: 'text',
+              text: '✅ Manual sync triggered successfully',
+            }],
+          };
+        }
+
         default:
           throw new Error(`Unknown tool: ${name}`);
       }
@@ -194,6 +246,23 @@ export async function main() {
         isError: true,
       };
     }
+  });
+
+  // Graceful shutdown
+  process.on('SIGINT', () => {
+    console.error('\n🛑 Shutting down...');
+    if (syncEngine) {
+      syncEngine.stop();
+    }
+    process.exit(0);
+  });
+
+  process.on('SIGTERM', () => {
+    console.error('\n🛑 Shutting down...');
+    if (syncEngine) {
+      syncEngine.stop();
+    }
+    process.exit(0);
   });
 
   // Start server
