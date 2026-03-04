@@ -9,6 +9,8 @@ export * from './config/index.js';
 export * from './types/index.js';
 export * from './api-client/index.js';
 
+// @ts-ignore
+const CIRVOY_PROJECT_ID = process.env.CIRVOY_PROJECT_ID || "";
 const CIRVOY_BASE_URL = process.env.CIRVOY_BASE_URL || 'https://cirvoy.com/api/kiro';
 const CIRVOY_API_TOKEN = process.env.CIRVOY_API_TOKEN || '';
 
